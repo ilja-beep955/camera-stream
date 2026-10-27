@@ -1,27 +1,30 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const ss = require('socket.io-stream');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  maxHttpBufferSize: 1e8 // Увеличиваем лимит для видео-чанков
+});
 
 app.use(express.static('public'));
 
 io.on('connection', (socket) => {
-  console.log('connected:', socket.id);
+  console.log('Подключен:', socket.id);
 
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     socket.roomId = roomId;
-    
-    // Сообщаем всем в комнате, что пришел новый участник
     socket.to(roomId).emit('user-connected', socket.id);
   });
 
-  // Пересылка сигналов (offer, answer, ICE) конкретному пользователю
-  socket.on('signal', ({ to, data }) => {
-    io.to(to).emit('signal', { from: socket.id, data });
+  // Принимаем видео-чанк от отправителя и шлем его в комнату
+  ss(socket).on('stream-video', (stream) => {
+    if (socket.roomId) {
+      stream.pipe(ss(socket).to(socket.roomId).emit('stream-video'));
+    }
   });
 
   socket.on('disconnect', () => {

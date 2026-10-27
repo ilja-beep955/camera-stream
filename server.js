@@ -4,9 +4,7 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  maxHttpBufferSize: 1e7 // Увеличиваем лимит до 10 МБ для передачи картинок
-});
+const io = new Server(server);
 
 app.use(express.static('public'));
 
@@ -14,14 +12,13 @@ io.on('connection', (socket) => {
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     socket.roomId = roomId;
+    // Сообщаем другим, что мы зашли
     socket.to(roomId).emit('user-connected', socket.id);
   });
 
-  // Получаем картинку от отправителя и шлем её всем в комнате (кроме него)
-  socket.on('video-frame', (base64Image) => {
-    if (socket.roomId) {
-      socket.to(socket.roomId).emit('video-frame', base64Image);
-    }
+  // Пересылка сигналов (SDP и ICE)
+  socket.on('signal', ({ to, data }) => {
+    io.to(to).emit('signal', { from: socket.id, data });
   });
 
   socket.on('disconnect', () => {

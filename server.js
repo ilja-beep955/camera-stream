@@ -12,11 +12,9 @@ io.on('connection', (socket) => {
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     socket.roomId = roomId;
-    // Сообщаем другим, что мы зашли
     socket.to(roomId).emit('user-connected', socket.id);
   });
 
-  // Пересылка сигналов (SDP и ICE)
   socket.on('signal', ({ to, data }) => {
     io.to(to).emit('signal', { from: socket.id, data });
   });

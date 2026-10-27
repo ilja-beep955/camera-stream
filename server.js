@@ -1,29 +1,26 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const ss = require('socket.io-stream');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  maxHttpBufferSize: 1e8 // Увеличиваем лимит для видео-чанков
+  maxHttpBufferSize: 1e7 // Увеличиваем лимит до 10 МБ для передачи картинок
 });
 
 app.use(express.static('public'));
 
 io.on('connection', (socket) => {
-  console.log('Подключен:', socket.id);
-
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     socket.roomId = roomId;
     socket.to(roomId).emit('user-connected', socket.id);
   });
 
-  // Принимаем видео-чанк от отправителя и шлем его в комнату
-  ss(socket).on('stream-video', (stream) => {
+  // Получаем картинку от отправителя и шлем её всем в комнате (кроме него)
+  socket.on('video-frame', (base64Image) => {
     if (socket.roomId) {
-      stream.pipe(ss(socket).to(socket.roomId).emit('stream-video'));
+      socket.to(socket.roomId).emit('video-frame', base64Image);
     }
   });
 

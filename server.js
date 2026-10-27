@@ -8,36 +8,26 @@ const io = new Server(server);
 
 app.use(express.static('public'));
 
-// Простая комната: sender + viewer
 io.on('connection', (socket) => {
   console.log('connected:', socket.id);
 
-  socket.on('join-as-sender', (roomId) => {
+  socket.on('join-room', (roomId) => {
     socket.join(roomId);
     socket.roomId = roomId;
-    socket.role = 'sender';
-    socket.to(roomId).emit('sender-ready', socket.id);
+    
+    // Сообщаем всем в комнате, что пришел новый участник
+    socket.to(roomId).emit('user-connected', socket.id);
   });
 
-  socket.on('join-as-viewer', (roomId) => {
-    socket.join(roomId);
-    socket.roomId = roomId;
-    socket.role = 'viewer';
-    // Сообщаем sender'у, что пришёл зритель
-    socket.to(roomId).emit('viewer-joined', socket.id);
-  });
-
-  // Пересылка offer/answer/ICE
+  // Пересылка сигналов (offer, answer, ICE) конкретному пользователю
   socket.on('signal', ({ to, data }) => {
     io.to(to).emit('signal', { from: socket.id, data });
   });
 
-  socket.on('stop-stream', () => {
-    if (socket.roomId) socket.to(socket.roomId).emit('stream-stopped');
-  });
-
   socket.on('disconnect', () => {
-    if (socket.roomId) socket.to(socket.roomId).emit('peer-left', socket.id);
+    if (socket.roomId) {
+      socket.to(socket.roomId).emit('user-disconnected', socket.id);
+    }
   });
 });
 

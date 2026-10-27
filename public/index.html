@@ -1,9 +1,146 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head><meta charset="utf-8"><title>Камера-стрим</title></head>
-<body style="font-family:sans-serif;text-align:center;padding:40px">
-  <h1>Трансляция камеры (с согласия)</h1>
-  <p><a href="sender.html">Я владелец камеры — транслировать</a></p>
-  <p><a href="viewer.html">Я смотрю камеру</a></p>
+<head>
+  <meta charset="utf-8">
+  <title>Двусторонняя видеосвязь</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; text-align: center; }
+    .videos { display: flex; justify-content: center; gap: 20px; margin-top: 20px; }
+    video { width: 45%; background: #000; border-radius: 8px; }
+    .controls { margin-top: 20px; }
+    input, button { padding: 10px; font-size: 16px; margin: 5px; }
+  </style>
+</head>
+<body>
+  <h2>Двусторонняя трансляция (С обеих сторон)</h2>
+  
+  <div class="controls">
+    <input id="room" value="room1" placeholder="Имя комнаты">
+    <button id="joinBtn">Войти в комнату</button>
+    <button id="leaveBtn" style="display:none;">Выйти</button>
+  </div>
+
+  <div class="videos">
+    <div>
+      <p>Ваша камера</p>
+      <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+    <div>
+      <p>Собеседник</p>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const roomInput = document.getElementById('room');
+    const joinBtn = document.getElementById('joinBtn');
+    const leaveBtn = document.getElementById('leaveBtn');
+
+    let localStream = null;
+    let peerConnection = null;
+    let currentRoom = '';
+    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }; // STUN сервер для работы через интернет
+
+    joinBtn.onclick = async () => {
+      currentRoom = roomInput.value.trim() || 'room1';
+      
+      // 1. Включаем свою камеру и микрофон
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+      } catch (e) {
+        alert('Нет доступа к камере/микрофону. Разрешите доступ в браузере.');
+        return;
+      }
+
+      // 2. Меняем кнопки
+      joinBtn.style.display = 'none';
+      roomInput.disabled = true;
+      leaveBtn.style.display = 'inline-block';
+
+      // 3. Заходим в комнату
+      socket.emit('join-room', currentRoom);
+    };
+
+    leaveBtn.onclick = () => {
+      socket.emit('leave-room'); // Наш сервер это не обрабатывает, но сокет отключится сам при перезагрузке или мы можем сделать это вручную
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+      if (peerConnection) peerConnection.close();
+      
+      localVideo.srcObject = null;
+      remoteVideo.srcObject = null;
+      
+      joinBtn.style.display = 'inline-block';
+      roomInput.disabled = false;
+      leaveBtn.style.display = 'none';
+      
+      // Перезагрузка страницы - самый надежный способ выйти и разорвать все соединения
+      window.location.reload(); 
+    };
+
+    // Функция создания P2P соединения
+    function createPeerConnection(remoteSocketId) {
+      peerConnection = new RTCPeerConnection(config);
+
+      // Добавляем свои треки (камеру и микрофон) в соединение
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+
+      // Когда получаем видео от собеседника
+      peerConnection.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      // Передаем ICE кандидатов через сокет
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('signal', { to: remoteSocketId, data: { candidate: event.candidate } });
+        }
+      };
+    }
+
+    // Когда в комнату заходит кто-то другой (или мы зашли, а кто-то уже был)
+    socket.on('user-connected', async (userId) => {
+      console.log('Подключился пользователь:', userId);
+      createPeerConnection(userId);
+      
+      // Тот, кто был первым, создает Offer
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      socket.emit('signal', { to: userId, data: { sdp: peerConnection.localDescription } });
+    });
+
+    // Прием сигналов (SDP и ICE)
+    socket.on('signal', async ({ from, data }) => {
+      if (!peerConnection) createPeerConnection(from);
+
+      if (data.sdp) {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        if (data.sdp.type === 'offer') {
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          socket.emit('signal', { to: from, data: { sdp: peerConnection.localDescription } });
+        }
+      } else if (data.candidate) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (e) {
+          console.error('Ошибка добавления ICE:', e);
+        }
+      }
+    });
+
+    socket.on('user-disconnected', () => {
+      console.log('Пользователь отключился');
+      if (peerConnection) peerConnection.close();
+      peerConnection = null;
+      remoteVideo.srcObject = null;
+    });
+  </script>
 </body>
 </html>

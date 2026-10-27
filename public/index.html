@@ -43,7 +43,25 @@
     let localStream = null;
     let peerConnection = null;
     let currentRoom = '';
-    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }; // STUN сервер для работы через интернет
+    // Было:
+// const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+// Стало (пример с публичным TURN):
+const config = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ]
+};
 
     joinBtn.onclick = async () => {
       currentRoom = roomInput.value.trim() || 'room1';

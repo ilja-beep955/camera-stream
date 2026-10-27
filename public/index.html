@@ -2,37 +2,32 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Быстрая видеосвязь (WebRTC)</title>
+  <title>Просмотр собеседника</title>
   <style>
     body { font-family: sans-serif; text-align: center; background: #222; color: white; padding: 20px; margin: 0; }
-    .videos { display: flex; justify-content: center; gap: 20px; margin-top: 20px; flex-wrap: wrap; }
-    .video-box { flex: 1; min-width: 300px; max-width: 600px; }
-    video { width: 100%; background: #000; border: 2px solid #444; border-radius: 10px; aspect-ratio: 4/3; object-fit: cover; }
+    .videos { display: flex; justify-content: center; margin-top: 20px; }
+    .video-box { width: 100%; max-width: 800px; }
+    video { width: 100%; background: #000; border: 2px solid #444; border-radius: 10px; aspect-ratio: 16/9; object-fit: cover; }
     .controls { margin: 20px 0; }
     input, button { padding: 10px 20px; font-size: 16px; border-radius: 5px; border: none; margin: 5px; cursor: pointer; }
     button { background: #4CAF50; color: white; font-weight: bold; }
     button:hover { background: #45a049; }
     button:disabled { background: #555; cursor: not-allowed; }
-    .status { font-size: 14px; color: #aaa; margin-top: 10px; }
+    .status { font-size: 16px; color: #4CAF50; margin-top: 10px; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h2>Видеосвязь (WebRTC)</h2>
-  <div class="status" id="statusText">Введите комнату и нажмите "Войти"</div>
+  <h2>Просмотр собеседника (невидимый режим)</h2>
+  <div class="status" id="statusText">Введите комнату и нажмите "Смотреть"</div>
   
   <div class="controls">
     <input id="roomInput" value="room1" placeholder="Имя комнаты">
-    <button id="joinBtn">Войти</button>
+    <button id="watchBtn">Смотреть</button>
     <button id="leaveBtn" style="display:none; background: #d32f2f;">Выйти</button>
   </div>
 
   <div class="videos">
     <div class="video-box">
-      <p>Вы</p>
-      <video id="localVideo" autoplay muted playsinline></video>
-    </div>
-    <div class="video-box">
-      <p>Собеседник</p>
       <video id="remoteVideo" autoplay playsinline></video>
     </div>
   </div>
@@ -40,78 +35,47 @@
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const roomInput = document.getElementById('roomInput');
-    const joinBtn = document.getElementById('joinBtn');
+    const watchBtn = document.getElementById('watchBtn');
     const leaveBtn = document.getElementById('leaveBtn');
     const statusText = document.getElementById('statusText');
 
-    let localStream = null;
     let peerConnection = null;
     let currentRoom = '';
 
-    // Конфигурация с надежными серверами обхода блокировок
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        }
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
       ]
     };
 
-    joinBtn.onclick = async () => {
+    watchBtn.onclick = () => {
       currentRoom = roomInput.value.trim() || 'room1';
-      statusText.textContent = 'Запрос доступа к камере...';
       
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } }, 
-          audio: true 
-        });
-        localVideo.srcObject = localStream;
-        
-        joinBtn.style.display = 'none';
-        roomInput.disabled = true;
-        leaveBtn.style.display = 'inline-block';
-        statusText.textContent = 'Ожидание собеседника...';
+      watchBtn.style.display = 'none';
+      roomInput.disabled = true;
+      leaveBtn.style.display = 'inline-block';
+      statusText.textContent = 'Подключение к комнате... Ожидание собеседника.';
 
-        socket.emit('join-room', currentRoom);
-      } catch (e) {
-        statusText.textContent = 'Ошибка: нет доступа к камере/микрофону.';
-        alert('Разрешите доступ к камере и микрофону в браузере.');
-      }
+      socket.emit('join-room', currentRoom);
     };
 
     leaveBtn.onclick = () => {
-      if (localStream) localStream.getTracks().forEach(t => t.stop());
       if (peerConnection) peerConnection.close();
       window.location.reload();
     };
 
+    // Мы НЕ запрашиваем камеру (getUserMedia), а только настраиваем прием
     function createPeerConnection(remoteSocketId) {
       peerConnection = new RTCPeerConnection(rtcConfig);
 
-      localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-      });
-
       peerConnection.ontrack = (event) => {
         remoteVideo.srcObject = event.streams[0];
-        statusText.textContent = 'Соединение установлено!';
+        statusText.textContent = 'Видео собеседника получено!';
       };
 
       peerConnection.onicecandidate = (event) => {
@@ -120,7 +84,6 @@
         }
       };
 
-      // Мониторинг состояния соединения
       peerConnection.onconnectionstatechange = () => {
         if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
           statusText.textContent = 'Соединение потеряно...';
@@ -128,11 +91,13 @@
       };
     }
 
+    // Когда собеседник заходит, мы создаем соединение, но не добавляем свои треки
     socket.on('user-connected', async (userId) => {
-      statusText.textContent = 'Собеседник найден, соединяем...';
+      statusText.textContent = 'Собеседник найден, устанавливаем соединение...';
       createPeerConnection(userId);
       
-      const offer = await peerConnection.createOffer();
+      // Создаем Offer с приемом видео/аудио, но без отправки своих
+      const offer = await peerConnection.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
       await peerConnection.setLocalDescription(offer);
       socket.emit('signal', { to: userId, data: { sdp: peerConnection.localDescription } });
     });

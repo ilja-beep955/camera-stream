@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="utf-8"><title>Sender</title></head>
+<body>
+  <h2>Трансляция камеры</h2>
+  <p>Комната: <input id="room" value="room1"></p>
+  <button id="start">Начать трансляцию (разрешить камеру)</button>
+  <button id="stop" disabled>Остановить</button>
+  <p id="status">Не транслируется</p>
+  <video id="preview" autoplay muted playsinline width="320"></video>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const status = document.getElementById('status');
+    const preview = document.getElementById('preview');
+    let stream, peer = null;
+    let currentViewer = null;
+
+    async function start() {
+      const room = document.getElementById('room').value.trim() || 'room1';
+
+      // ЯВНОЕ разрешение пользователя — браузер спросит доступ
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      preview.srcObject = stream;
+      status.textContent = 'Ожидание зрителя...';
+      socket.emit('join-as-sender', room);
+
+      document.getElementById('start').disabled = true;
+      document.getElementById('stop').disabled = false;
+    }
+
+    async function createPeer(viewerId) {
+      peer = new RTCPeerConnection({ iceServers: [] }); // локальная сеть — STUN не нужен
+      stream.getTracks().forEach(t => peer.addTrack(t, stream));
+
+      peer.onicecandidate = (e) => {
+        if (e.candidate) socket.emit('signal', { to: viewerId, data: { candidate: e.candidate } });
+      };
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket.emit('signal', { to: viewerId, data: { sdp: peer.localDescription } });
+    }
+
+    socket.on('viewer-joined', async (viewerId) => {
+      currentViewer = viewerId;
+      status.textContent = 'Зритель подключён — идёт трансляция';
+      await createPeer(viewerId);
+    });
+
+    socket.on('signal', async ({ from, data }) => {
+      if (data.sdp && data.sdp.type === 'answer') {
+        await peer.setRemoteDescription(data.sdp);
+      } else if (data.candidate) {
+        try { await peer.addIceCandidate(data.candidate); } catch (e) {}
+      }
+    });
+
+    socket.on('peer-left', () => {
+      status.textContent = 'Зритель отключился';
+      if (peer) peer.close();
+      peer = null;
+    });
+
+    document.getElementById('start').onclick = start;
+    document.getElementById('stop').onclick = () => {
+      socket.emit('stop-stream');
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (peer) peer.close();
+      preview.srcObject = null;
+      status.textContent = 'Трансляция остановлена';
+      document.getElementById('start').disabled = false;
+      document.getElementById('stop').disabled = true;
+    };
+  </script>
+</body>
+</html>

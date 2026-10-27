@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="utf-8"><title>Viewer</title></head>
+<body>
+  <h2>Просмотр камеры</h2>
+  <p>Комната: <input id="room" value="room1"></p>
+  <button id="connect">Подключиться</button>
+  <p id="status">Не подключено</p>
+  <video id="remote" autoplay playsinline width="480" style="background:#000"></video>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const status = document.getElementById('status');
+    const remote = document.getElementById('remote');
+    let peer = null;
+    let senderId = null;
+
+    document.getElementById('connect').onclick = () => {
+      const room = document.getElementById('room').value.trim() || 'room1';
+      socket.emit('join-as-viewer', room);
+      status.textContent = 'Ожидание трансляции...';
+    };
+
+    // Когда sender готов — создаём peer и ждём offer
+    socket.on('sender-ready', (id) => {
+      senderId = id;
+      status.textContent = 'Владелец камеры в сети, подключаемся...';
+    });
+
+    socket.on('signal', async ({ from, data }) => {
+      senderId = from;
+      if (data.sdp && data.sdp.type === 'offer') {
+        peer = new RTCPeerConnection({ iceServers: [] });
+        peer.ontrack = (e) => { remote.srcObject = e.streams[0]; };
+        peer.onicecandidate = (e) => {
+          if (e.candidate) socket.emit('signal', { to: from, data: { candidate: e.candidate } });
+        };
+        await peer.setRemoteDescription(data.sdp);
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit('signal', { to: from, data: { sdp: peer.localDescription } });
+        status.textContent = 'Идёт просмотр';
+      } else if (data.candidate) {
+        try { await peer.addIceCandidate(data.candidate); } catch (e) {}
+      }
+    });
+
+    socket.on('stream-stopped', () => {
+      status.textContent = 'Владелец остановил трансляцию';
+      remote.srcObject = null;
+      if (peer) peer.close();
+    });
+
+    socket.on('peer-left', () => {
+      status.textContent = 'Владелец камеры отключился';
+      remote.srcObject = null;
+    });
+  </script>
+</body>
+</html>
